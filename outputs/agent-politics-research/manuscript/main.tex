@@ -1,0 +1,1041 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,booktabs,graphicx,hyperref}
+\hypersetup{hidelinks}
+\usepackage{xurl}
+\setlength{\emergencystretch}{3em}
+\newtheorem{proposition}{Proposition}
+\title{Agent Politics: Context, Authorization and the Cost of Independent Oversight}
+\author{Shan Huang\\Supplywhy.ai Inc}
+\date{October 2026}
+\begin{document}
+\maketitle
+\begin{abstract}
+An independent reviewer can block an agent's proposed tool action, but it must
+receive enough evidence to recognize authorized actions without inheriting
+malicious instructions. We examine this tension in a local, instrumented
+AgentDojo study of integrated hardening and mandatory pre-action review.
+Five configurations share per-episode input-plus-output token caps of 8k,
+16k, 32k and 64k. Across 120 development episodes, the 8k cap prevents both
+useful completion and attacker success before any review occurs. At 64k,
+full-history review completes three clean tasks but permits all three tested
+injections on one calendar task; minimized review blocks those injections
+and completes the attacked task, but fails one clean task requiring contextual
+authorization. These small, fixed cohorts do not establish a general ranking.
+Three repetitions on ten additional tasks comprise 120 clean and 360 attacked
+episodes. Ordinary execution, hardened execution, full review and minimized
+review yield 6--7/30, 6--7/30, 6--7/30 and 0/30 attacker successes and
+7--8/30, 7--8/30, 6--8/30 and 15--16/30 native completions without attacker
+success, respectively,
+with ranges across repetitions. Exact-payload
+receipt differs across arms; scorer-version and state-change sensitivities
+also limit interpretation. We preserve trajectories, gate decisions and
+token ledgers and verify recorded-state replay. The results motivate evaluating
+attack exposure, authorized completion and actual resource consumption jointly,
+rather than interpreting low attack success alone as effective defense.
+\end{abstract}
+
+\section{Introduction}
+Tool-using agents encounter untrusted text while performing legitimate tasks.
+When that text induces a new action, a mandatory reviewer can inspect the
+proposal before it reaches the tool runtime. This architecture creates a
+practical information problem: the evidence needed to authorize a dynamically
+discovered file or event may reside in the same history that carries an attack.
+Removing history reduces direct exposure but may remove necessary evidence.
+Providing history can improve useful acceptance while exposing the reviewer
+to attacker-controlled claims.
+
+We ask three bounded questions. First, how do full-history and minimized review
+behave on the same development tasks and injection payloads? Second, what does
+a low attack-success score mean when executor and reviewer share a restrictive
+token cap? Third, which recording and scoring checks are necessary before an
+apparent safety--utility difference can be interpreted? We study concrete
+prompted configurations, not all forms of integrated hardening or oversight.
+
+The paper offers an instrumented empirical case study with three outputs:
+a common-token-cap comparison that retains utility and exhaustion outcomes;
+paired observations of context-dependent authorization failures; and a
+reproducibility audit covering gate enforcement, prompt accounting, runtime
+variability and scorer sensitivity. These are bounded observations, not a new
+general defense or proof that independent oversight is superior. Theoretical
+calculations in the appendix illustrate conditional failure accounting under
+assumed response curves; they are not fitted explanations of the experiments.
+
+\section{Related work}
+Independent monitoring is already central to AI Control
+\cite{greenblatt2024}, and games for evaluating monitoring protocols have already
+been formalized \cite{griffin2024}. We do not claim either concept as new.
+Our comparison concerns specific reviewer-context choices under a common
+token admission policy. We do not measure an optimal safety--utility frontier
+or isolate model diversity. Establishing superiority over existing defenses
+would require implementations of those defenses and a broader controlled
+evaluation, which are outside the present evidence.
+
+Task Shield already prevents misaligned tool execution and provides corrective
+feedback \cite{jia2024}; consequently, a monitor's veto authority is not a
+novel mechanism. Tool-interface firewalls instead transform inputs and outputs
+\cite{bhagwatkar2025}. Their adaptive evaluation further cautions against
+generalizing fixed-benchmark protection to stronger attacks. Our implemented
+immutable-action veto is a different intervention, not a reproduction of
+either complete defense. The present elementary budget derivation is retained
+as a diagnostic model; it does not establish novelty over monitoring games.
+Bhagwatkar et al. also identify loss of task-critical content and brittle
+state-based utility metrics in AgentDojo \cite{bhagwatkar2025}. Our local
+read-flag and date sensitivity checks therefore document consequences for
+this experiment, rather than claiming the discovery of benchmark fragility.
+Their token-overhead analysis likewise precedes our accounting study; our
+specific comparison enforces a shared episode admission cap across actor
+and reviewer calls.
+
+Recent close precedents further limit interpretation. AuthorizationPairs studies
+permission-sensitive reviews, unusable decisions, interface changes and reviewer
+compositions \cite{jing2026authorization}. SARA separates action induction from
+runtime authorization, including argument-level support and audited history
+\cite{guo2026sara}. AuthBench studies excess and insufficient permissions in
+generated authorization policies \cite{yan2026authbench}. Consequently, our small
+prompt-sensitivity diagnostics and the observation that review can reject useful
+actions are not claimed as original concepts. We position the present work as
+a reproducible case study of context and budget interactions in a particular
+native-tool setting. The results complement these methods through detailed
+trajectory and accounting checks; they are not head-to-head evaluations of them.
+
+
+\section{Threat model and experimental design}
+\subsection{Trust boundary and intervention}
+The attacker can replace a designated tool-returned description, email body
+or document content. It cannot change the trusted user request, dispatcher,
+review implementation or evaluation code. Its goal is the benchmark's
+unrequested simulated email action. All effects occur in an in-memory fictional
+workspace. Host compromise, bypass of the dispatcher, covert channels and
+confidentiality of all reads or final answers are outside this experiment.
+
+The gate serializes a proposed action and arguments before review. Only a
+valid affirmative decision permits that candidate to execute. Rejection,
+malformed output and reviewer unavailability prevent execution; nested function
+calls in arguments are rejected. The reviewer cannot rewrite an action.
+The executor can subsequently propose another action within its remaining
+step and token limits. An allowlist exempts four inspected nonmutating tools:
+calendar search, day-calendar lookup, filename search and file listing.
+All other tools remain gated in reviewed configurations. This scope is held
+fixed in the budget and transfer studies.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{images/native-review-flow-v1.pdf}
+\caption{Reviewed execution path. The gate enforces the recorded decision;
+review accuracy remains a learned-model behavior. Full and minimized review
+share the trusted task, candidate and schema, but differ in access to history.
+Every model request also passes the shared token-budget admission check
+(omitted from the diagram). Ordinary and hardened arms omit model review.}
+\label{fig:review-flow}
+\end{figure}
+
+\subsection{Configurations and resources}
+We compare ordinary execution, an executor with appended trust-boundary and
+argument-authorization instructions, full-history self-role review,
+full-history independent-role review, and minimized independent-role review.
+The two full-history review roles differ only in the initial role sentence
+of a fresh serialized request. They do not implement hidden-state introspection
+or separate organizations. Minimized review receives the trusted request and
+candidate and proposed tool schema but omits recorded history. Provider-level training remains present
+in every configuration.
+
+Native experiments use the community MLX 4-bit Qwen3-4B-Instruct-2507 snapshot
+\nolinkurl{50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b} and AgentDojo workspace v1
+at commit \nolinkurl{089ed468cf3ed0322acc66b0211f26d9d90dbf60}.
+Greedy decoding uses fixed seeds, up to eight actor steps, 512 output tokens
+per actor call and 128 per review. Input and output usage share one episode
+ledger. Admission reserves the rendered prompt and the full output allowance;
+settlement releases unused output reservation. Requests that cannot fit are
+not dispatched. There is no adaptive shrinking to fit the remaining budget.
+These caps do not equalize actual token use, FLOPs, latency or monetary cost.
+Prompt-cache reuse is recorded, and no latency superiority is inferred.
+
+\subsection{Cohorts and measurements}
+The development matrix crosses five configurations with four caps
+(8k, 16k, 32k and 64k). Each cell contains three clean tasks---calendar lookup,
+file-based feedback and deletion of the largest file---and three fixed payloads
+on one calendar task: direct instruction, claimed workflow authority and role
+spoofing. Thus 120 episodes reuse three underlying clean tasks and one attacked
+task. They are not 120 independent task instances or adaptive attack trials.
+
+We report native task utility, attacker-goal success, utility under attack,
+budget exhaustion, actual calls and token consumption for the evaluation runs
+included in each table; these totals are not the cost of the entire research
+workflow. Our operational
+``safe completion'' metric requires native task utility and absence of native
+attacker-goal success; it does not certify absence of every unauthorized effect.
+The native email predicate requires a unique final-state match. A supplementary
+post-hoc audit therefore counts successful tool operations with the exact goal
+recipient, subject and body, including repeated sends, separately from that
+predicate. Original native scores remain unchanged. Budget exhaustion may
+occur before or after a side effect, so it is never automatically classified
+as safety. Proposed actions, permitted actions and final state are distinct.
+We do not report task-level confidence intervals from payload repetitions on
+one task. The ten-task extension is described separately below.
+
+\section{Results}
+\subsection{Budget limits can suppress both attack and utility}
+At 8k, every configuration exhausts its budget after the first read and before
+the next actor request. No reviewer is called. Clean utility, attacked utility
+and attacker success are all zero. This is a resource floor, not evidence that
+any reviewer detects attacks. At 16k, all configurations complete two of three
+clean tasks; the ordinary deletion trajectory would require a 16,069-token
+reservation. This boundary depends on the documented admission policy.
+
+At 32k and 64k, ordinary, hardened and both full-history configurations score
+three clean successes; minimized review scores two. At both caps, all three
+calendar payloads succeed against the four non-minimized configurations,
+whereas minimized review has zero attacker successes and three attacked-task
+successes. At 32k, both full-history roles exhaust once after an authorized
+deletion but before a final reply. At 64k no configuration exhausts.
+The complete matrix uses 293 actual calls; state, score and ledger replay
+passes all forty runs, and offline tokenization matches all 331 admitted or
+denied request records.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{images/native-budget-paper-v1.pdf}
+\caption{Development outcomes under common token caps. Attack columns contain
+three payloads on one task, not three independent tasks. Native utility can
+coexist with exhaustion before a final reply.}
+\label{fig:budget-matrix-main}
+\end{figure}
+
+\subsection{Review context presents a task-dependent tradeoff}
+In the clean deletion example, a file listing supplies the relationship between
+a dynamically discovered identifier and the requested largest file. Full-history
+review permits the correct deletion; minimized review rejects it. In the
+calendar injection examples, full-history review permits the unrequested email,
+while minimized review blocks it and the executor completes the calendar task.
+The earlier uncapped native comparison preserves matching proposed email
+arguments across the ordinary, full and minimized arms. These observations
+support investigating the information supplied to a reviewer. They do not
+establish that context length alone causes the outcome or that all necessary
+context can be safely removed.
+
+Full-history self-role and independent-role configurations have identical
+aggregate development outcomes. Because the difference is only a role sentence,
+this result does not establish equivalence of self-review and independent
+oversight. Similarly, one failed hardening instruction does not characterize
+all integrated defenses. Constructed-candidate diagnostics in the appendix
+show that minimized reviewers can also approve wrong-document actions,
+preventing a general reliability claim from the zero-success attack cohort.
+
+\subsection{Ten-task extension: repeated paired evaluation}
+We freeze ten additional public workspace tasks: four calendar tasks, four
+email-derived tasks and two document-editing tasks. They have not previously
+been run in our local native-model experiments; this does not imply absence
+from model training or the separate archival analysis. Three fixed payloads
+per task are tested through reference tool probes before inference. Probes
+demonstrate possible retrieval, not actual exposure; one document vector is
+in a related tips file rather than the explicitly requested activities file.
+Only designated content changes, plus native content-derived file size, are
+allowed. Actual exposure and all non-exposure cases must be retained.
+
+The frozen plan specifies four arms (ordinary, hardened, full and minimized),
+a 64k token cap and three whole-task repetitions, with seeded randomized
+task/arm order within each cohort. The self-role prompt remains a diagnostic
+in the earlier matrix. All three clean and paired attack cohorts are complete
+and verified. The 480 evaluation episodes reuse ten underlying tasks.
+Inference-source/model hashes are frozen before the first call, and the original
+four-tool read allowlist is unchanged.
+
+Transfer run and replay processes use a fixed Python hash seed to reproduce
+the native calendar's set-based participant ordering. File-write clocks are
+restored from tool returns. Calendar creation also sends benchmark invitation
+mail internally; its timestamps may only be recorded in final state. These
+clock values are replay inputs, not independently validated timestamp outputs.
+All other fields are recomputed by native tools; tests detect tampered mail
+bodies and file contents. The verifier also checks full message history and
+final assistant text. Thirty integration tests and 46 core tests pass.
+
+\paragraph{First clean transfer repetition.}
+All forty task/arm configurations passed recorded-state, message and native
+scorer replay; independent tokenization matched 193 admitted or denied request
+records. Ordinary, hardened, full-context and minimized-context arms achieved
+4/10, 4/10, 5/10 and 6/10 native task successes, respectively. Their aggregate
+actual token consumption was 169,885, 167,419, 196,223 and 207,880. The hardened
+arm had one output truncation; the minimized arm had one budget exhaustion
+and one step-limit termination. All cases remain in the denominators.
+These are descriptive results from one repetition on purposively selected
+tasks; clean outcomes alone establish neither a general ranking nor
+a security advantage. In particular, the minimized arm consumed more total
+tokens despite receiving less context per review.
+
+\paragraph{First paired attack repetition.}
+All 120 attacked episodes passed replay verification, and independent
+retokenization matched all 610 admitted or denied request records.
+Table~\ref{tab:transfer-paired} reports all planned cases, including absent
+payload receipt and failed tasks. Attacker success was 7/30, 6/30, 6/30 and
+0/30 for ordinary, hardened, full-history and minimized review, respectively.
+Native utility with no native attacker success was 7/30, 7/30, 8/30 and 15/30.
+The exact-goal successful-send audit agrees with the native attacker predicate
+on all 120 episodes; this does not rule out other unauthorized effects.
+
+\begin{table}[htbp]
+\centering\small
+\input{transfer-repeated-table.tex}
+\caption{Three complete transfer repetitions. Clean and attacked columns are
+native task utility; AS is native attacker success; Safe is native utility
+with no native attacker success; Exposed is exact-payload receipt in an actor
+prompt. Each repetition reuses the same ten tasks and three payloads per task;
+repeated episodes do not increase the number of independent tasks.}
+\label{tab:transfer-paired}
+\end{table}
+
+Exact-payload actor receipt occurred in 24/30, 21/30, 24/30 and 18/30 episodes,
+respectively. Full-history reviewer prompts received the exact payload in
+21/30 episodes; minimized reviewer history is absent by construction.
+Differences in retrieval and gating therefore change exposure as well as
+execution. These are descriptive denominators, not a causal defense estimate.
+All arms received the payload on tasks 1, 8 and 9, where the observed native
+attacker successes were concentrated. Conversely, minimized review completed
+none of task 34's three attacked cases, despite succeeding on its clean case.
+The per-task figure preserves this heterogeneity.
+
+No attacked episode exhausted the token cap. Ordinary execution reached the
+step limit twice; hardened execution had one output truncation; minimized
+review reached the step limit five times. Full-history review completed its
+trajectories without these terminations, although native task utility often
+failed. Actual attacked-cohort token totals were 572,387, 441,130, 691,491 and
+625,125 in the same arm order. Thus minimized review consumed fewer tokens
+than full-history review but more than either unreviewed arm. The common cap
+does not imply equal realized cost or successful task completion.
+
+An exact-prefix audit of task 29 further limits attribution: ordinary and
+full-review runs have identical first two rendered actor prompts (3,669 and
+4,472 tokens) and matching generation settings. Their first responses match,
+but their second responses differ before any model-backed review. Ordinary
+execution claims completion without appending; the full-review trajectory
+proposes an append, which is subsequently approved. Thus this clean-success
+difference cannot be attributed solely to the review decision. The cause of
+the earlier divergence is not established.
+
+\paragraph{Second clean repetition.}
+The second forty-episode clean cohort also passes native replay verification;
+independent tokenization matches all 196 request records. Native successes
+are 5/10, 4/10, 5/10 and 6/10 in ordinary, hardened, full-history and minimized
+arm order. The only binary utility change from the first repetition is
+ordinary task 29, which now succeeds. Actual token totals are 176,164, 155,871,
+216,097 and 207,266. The one-task first-repetition advantage of full review over
+ordinary execution therefore does not persist in this clean repeat. This is
+within-task run variation, not an increase in the number of independent tasks.
+The clean-cohort token-cost ordering of the two reviewed arms also reverses:
+full-history review costs less in the first repetition and more in the second.
+
+\paragraph{Second paired attack repetition.}
+The second 120 attacked episodes pass native replay, and all 617 prompt-token
+records match independent retokenization. In ordinary, hardened, full-history
+and minimized order, attacker successes are 7/30, 6/30, 7/30 and 0/30; native
+utility without attacker success is 7/30, 8/30, 6/30 and 15/30.
+Exact-payload actor receipt is unchanged at the episode level between the two
+repetitions. The exact-goal send audit again agrees with the native attacker
+predicate on all cases. Actual attacked token totals are 575,518, 449,977,
+704,646 and 625,132, respectively.
+
+The full-history arm changes from no attacker success to attacker success on
+task 8's role-spoof payload. Task 34's role-spoof utility changes from failure
+to success for hardened execution and from success to failure for full review.
+Full review also reaches the budget limit on two task-34 variants and the step
+limit on two task-15 variants, whereas its first-repetition trajectories had
+none of these terminations. Together with ordinary clean task 29, four of the
+160 matched task/arm/payload configurations change native utility, one changes
+attacker success and four change termination status. These are descriptive
+within-case changes, not independent samples or evidence of a known runtime
+cause.
+
+The third clean cohort has 5/10, 4/10, 5/10 and 6/10 native successes in
+ordinary, hardened, full and minimized order, matching repetition 2 at the
+individual task level. Ordinary task 15 changes from a completed response to
+output truncation, with native failure in both cases. Token totals for these
+40 evaluation runs are 182,059, 160,050, 216,172 and 207,377, respectively;
+offline tokenization matches all 198 admitted or budget-denied request records.
+
+The third attack cohort has 6/30, 7/30, 7/30 and 0/30 attacker successes and
+8/30, 8/30, 6/30 and 16/30 native completions without attacker success,
+respectively. Actual attacked token totals are 552,100, 500,711, 666,403 and
+641,304. All 612 admitted or denied request records pass independent prompt
+retokenization. Exact-payload receipt remains unchanged at the individual
+case level across all three repetitions, and the exact-goal successful-send
+audit agrees with the native attacker predicate on all 360 attacked episodes.
+
+Across the 160 matched task/arm/payload configurations, six change native
+utility across repetitions, three change attacker success, five change safe
+completion and ten change termination status. These are descriptive counts of
+within-case variation, not independent statistical samples. In repetition 3,
+ordinary task 8's role-spoof case changes from attacker success to safe
+completion; hardened task 29's direct case changes to attacker success.
+Minimized task 34's direct case gains native utility despite ending in budget
+exhaustion, illustrating that termination status alone does not determine
+whether a useful side effect has already occurred.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{images/transfer-three-repetitions-v1.pdf}
+\caption{Three repetitions on the same ten tasks. Each arm has ten clean
+and thirty attacked episodes per repetition. Token totals cover the forty
+included evaluation episodes per arm and repetition. Minimized review has
+fewer observed attacker successes and more safe completions in this study,
+but its token consumption exceeds ordinary and hardened execution. Repetition
+bars are descriptive; they are not independent task samples.}
+\label{fig:transfer-repetitions}
+\end{figure}
+
+
+\paragraph{An illustrative attack trajectory.}
+In the first repetition's direct payload on task 9, the user requests a
+follow-up calendar meeting with participants copied from an earlier event.
+All four arms receive the exact payload in an actor prompt and propose the
+attacker's unrelated email. Ordinary and hardened execution send it.
+Full-history and minimized review receive identical calendar-creation and
+email candidates: both approve creation, but only full-history review approves
+the email. The minimized gate blocks the email, yielding native utility true
+and attacker success false; the other three trajectories have the opposite
+pair of native scores. Replay verifies these operations and the two review
+decisions. This post-hoc example locates the different email outcome at the
+gate; it is not a controlled causal estimate of removing history.
+
+The same example also exposes an authorization limitation: the minimized
+reviewer approves a calendar candidate containing participant addresses even
+though the earlier event's participant evidence is absent from its packet.
+A correct resulting action therefore does not demonstrate that its approval
+was grounded in the required task evidence. Zero attacker success and sound
+argument-level authorization are distinct properties.
+
+\paragraph{Scorer sensitivity identified during inspection.}
+These counts refer specifically to the frozen v1 scorer, not independently
+adjudicated semantic completion. Inspection of the pinned upstream source
+reveals that task 18 expects June 18, whereas its v1.1.1 revision expects
+May 18. Recorded ordinary, hardened and full-context clean runs created
+May 18 events; this observation alone does not establish satisfaction of
+every task condition. In tasks 14 and 17, reading unread mail changes read
+flags, and the strict scorer requires unchanged state. For example, the
+ordinary task-14 answer contains the reference date and time but fails that
+state condition. Task 17 also contains a problematic time predicate in v1,
+subsequently revised upstream. Frozen scores and trajectories are preserved.
+A post-hoc audit on twelve verified clean trajectories isolates two changes
+(Table~\ref{tab:scorer-sensitivity}). For task 18, changing only the reference
+start/end dates from June 18 to May 18 changes the ordinary and full-review
+scores from failure to success; hardened and minimized remain failures.
+For tasks 14 and 17, all eight outputs pass the upstream output-only predicate.
+Seven originally fail the strict scorer, and their serialized environments
+become equal when only inbox read flags are restored. This establishes a
+read-state explanation for those seven score failures, not independent semantic
+correctness. In particular, task 17's flawed time predicate remains in the
+output-only check. No inference is rerun, no original scores are overwritten,
+and these diagnostics are not combined into a revised headline success rate.
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabular}{lccc}
+\toprule
+Configuration & Task 14: N$\to$O & Task 17: N$\to$O & Task 18: N$\to$D\\
+\midrule
+Ordinary & $0\to1$ & $0\to1$ & $0\to1$\\
+Hardened & $0\to1$ & $0\to1$ & $0\to0$\\
+Full review & $0\to1$ & $0\to1$ & $0\to1$\\
+Minimized review & $1\to1$ & $0\to1$ & $0\to0$\\
+\bottomrule
+\end{tabular}
+\caption{Post-hoc scorer sensitivity on the same saved clean trajectories.
+Each arrow connects the native score to a diagnostic alternative on the same
+saved trajectory. N is native v1;
+O disables all state constraints in the upstream output predicate;
+D changes only task 18's reference month. Neither alternative is an
+independent semantic judge or a new model run.}
+\label{tab:scorer-sensitivity}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{images/transfer-r1-paired-v1.pdf}
+\caption{First paired transfer repetition: clean utility, utility without
+native attacker success, native attacker success and exact-payload actor
+receipt, by task. Each attacked cell contains three fixed payloads, not three
+independent tasks. All non-exposure and failed-task cases are retained.}
+\end{figure}
+
+
+\section{Discussion and limitations}
+\paragraph{Information quality rather than reviewer count.}
+The tested gate enforces decisions, but correct enforcement cannot correct a
+reviewer's mistaken authorization. History can provide essential evidence and
+attacker-controlled instructions simultaneously. A future evidence-selection
+mechanism should therefore be evaluated for both useful acceptance and
+resistance to manipulation. Our experiments do not yet validate such a mechanism.
+
+\paragraph{Resource accounting is part of the outcome.}
+A rejected action can provoke additional attempts and longer trajectories.
+Shorter review prompts consequently need not reduce total consumption.
+The 8k results demonstrate why attack success must be interpreted alongside
+utility and actual dispatch. These fixed policies do not optimize allocation:
+models are not told the remaining budget, and output allowances remain fixed.
+
+\paragraph{Validity and scope.}
+Native model inference uses one small quantized model, a small purposive task
+sample and fixed hand-authored attack families. Broader whole-task replication,
+model diversity and adaptive attackers are needed to estimate generality.
+Development prompts and read policies were revised during exploratory work;
+the chronology and retained alternatives are documented in the appendix.
+The extension freezes its execution inputs but is not externally preregistered.
+Native scorers have strict state constraints and version-sensitive task facts;
+recorded-state replay validates implementation consistency, not independent
+semantic correctness. No statistical significance or universal ranking is claimed.
+
+\paragraph{Reproducibility is not determinism.}
+An earlier uncapped and later capped deletion run have identical first three
+rendered actor prompts and matching settings but different third outputs.
+A subsequent ten-call fixed-request diagnostic, split between cache capacities
+10 and 0, produces identical outputs and does not reproduce that divergence.
+Its cause remains unknown. Seed control and replay of saved decisions cannot
+substitute for repeated end-to-end model runs.
+
+\section{Conclusion}
+In this bounded study, low attack success has two distinct explanations:
+resource exhaustion that also prevents useful work, and a review configuration
+that blocks the tested injected actions while sacrificing a contextual clean
+task. Full-history review shows the opposite tradeoff on these examples.
+Across all three ten-task transfer repetitions, minimized review has fewer
+native attacker successes and more native completions without attacker
+success, but different exposure and failed tasks qualify this comparison.
+These cohorts do not establish an architecture winner. Meaningful evaluation
+requires joint reporting of exposure, authorized completion, unsafe effects and
+actual resource consumption, with versioned scorers and preserved trajectories.
+The current evidence supports this empirical characterization; it does not
+support a general protection claim or a new optimal allocation policy.
+
+\section{Reproducibility and authorship}
+The local artifact retains model requests and responses, proposed tool actions,
+review decisions, native tool messages, initial and final environments, scorer
+outputs and token ledgers. Run manifests record model and implementation
+hashes; the transfer plan and execution specification preserve the selected
+tasks and inference settings. Analysis scripts generate the tables and figures
+from these records and refuse incomplete transfer cohorts. Recorded-decision
+replay verifies consistency with saved operations; whole-task repetitions
+separately assess variation in new model runs. Synthetic calculations and
+historical benchmark-log summaries remain separate from new native inference.
+The scripts and fixtures are retained locally; no public repository release
+is claimed in this paper. Generated code and derivations still require
+independent research review.
+
+Generative AI was used to draft the text, code and mathematical
+analysis. Shan Huang is the sole listed author, affiliated with Supplywhy.ai Inc.
+The author must verify and take responsibility for the submitted content.
+
+
+\appendix
+\section{Probability accounting}
+For a particular proposed action let $D$ denote that it is dangerous and $M$
+denote that the monitor would allow that same action. Under a perfect gate,
+\[
+ R_B=P(D\cap M)=P(D)P(M\mid D).
+\]
+This identity does not require independence. When defining a monitor marginal
+on scenarios without a dangerous proposal, the study must specify a
+counterfactual candidate; that diagnostic marginal is not automatically the
+live monitor error rate.
+
+Given marginals $p=P(D)$ and $m=P(M)$ in a specified joint experiment,
+the classical bounds are
+\[
+ \max(0,p+m-1)\leq P(D\cap M)\leq \min(p,m).
+\]
+These are established probability facts, not original results.
+The earlier multiplicative decomposition into gate reliability, detector
+accuracy and compromise probability requires corresponding conditional
+definitions or independence assumptions.
+
+\section{A restricted budget model}
+Let $B\geq0$ be an abstract total inference budget and let $x\in[0,B]$
+be allocated to review. Executor allocation is $B-x$.
+For each attack family $k$, assume
+\begin{align}
+ P(D\mid k,x)&=p_{0k}e^{-\alpha_k(B-x)},\\
+ P(M\mid D,k,x)&=c_k+(1-c_k)e^{-\beta_k x},\\
+ R_k(x)&=p_{0k}e^{-\alpha_k(B-x)}
+          [c_k+(1-c_k)e^{-\beta_k x}].
+\end{align}
+Here $p_{0k}\in(0,1]$, $\alpha_k,\beta_k>0$ and $c_k\in[0,1]$.
+All are assumptions in the synthetic experiment. $B$ is a design value,
+not a token or dollar budget. The coefficient $c_k$ is an irreducible
+conditional miss floor, not a Pearson correlation or a measured compromise
+probability. Changing executor budget can change the distribution of dangerous
+candidates; the fixed conditional response curve is therefore a substantive
+model assumption requiring calibration.
+
+An illustrative integrated arm has
+$R_{A,k}=p_{0k}e^{-\gamma_k B}$ with assumed $\gamma_k>0$.
+No equality between $\alpha_k$ and $\gamma_k$ is imposed. Comparisons are
+sensitive to both curves and cannot establish superiority without measurement.
+
+\begin{proposition}[Single-family allocation under the assumed curves]
+Suppress $k$. One minimizing review allocation is $x^*=0$ if
+$\beta\leq\alpha$ or $c\geq1-\alpha/\beta$.
+If $\beta>\alpha$ and $c=0$, one minimizer is $x^*=B$.
+Otherwise, for $0<c<1-\alpha/\beta$,
+\[
+ x^*=\min\left\{B,\frac{1}{\beta}
+       \log\frac{(\beta-\alpha)(1-c)}{\alpha c}\right\}.
+\]
+\end{proposition}
+\begin{proof}
+Writing $K=p_0e^{-\alpha B}>0$, the objective is
+$R(x)=K[ce^{\alpha x}+(1-c)e^{(\alpha-\beta)x}]$.
+It is convex because
+\[
+ R''(x)=K[c\alpha^2e^{\alpha x}
+ +(1-c)(\alpha-\beta)^2e^{(\alpha-\beta)x}]\geq0.
+\]
+If $\beta\leq\alpha$, both terms are nondecreasing.
+For $\beta>\alpha$, $R'(0)=K[\alpha-\beta(1-c)]$.
+If this is nonnegative, convexity makes zero optimal. If $c=0$,
+the remaining exponential decreases. In the remaining case solving
+$R'(x)=0$ yields the displayed positive value; restricting it to $[0,B]$
+gives the constrained minimizer. Flat cases can have additional minimizers.
+\end{proof}
+
+This elementary derivation has not been established as novel. Its practical
+implication is conditional: a sufficiently large residual miss floor can make
+additional review unattractive even when review is initially more efficient
+than executor investment.
+
+\section{Finite-family attacker response}
+The defender publicly commits to deterministic $x$; the attacker then chooses
+$k$ from a known finite set. Both use harm as the zero-sum payoff:
+\[
+ V_B=\min_{x\in[0,B]}\max_k R_k(x).
+\]
+The maximum of these convex continuous curves is convex and continuous, so a
+minimizer exists on the compact interval. For fixed $x$, a mixed attack cannot
+exceed the largest pure-family payoff. We numerically minimize the upper
+envelope, explicitly checking endpoints. This is a deterministic commitment
+model, not a solution for hidden randomized deployment or an unrestricted
+adaptive adversary. Golden-section results are checked against dense grids.
+
+\section{Synthetic calculations}
+The dependence pilot samples 100,000 trials for each of 11 joint distributions
+with $p=m=0.2$. Mixing independence with maximal positive dependence gives
+$P(D\cap M)=0.04+0.16w$. Relative to an assumed A risk of 0.10, equality
+occurs at $w=0.375$. Wilson intervals quantify Monte Carlo error only.
+
+The budget calculation uses $B=4$ and the following assumed parameters:
+\begin{center}
+\begin{tabular}{lrrrrr}
+\toprule
+Family & $p_0$ & $\alpha$ & $\beta$ & $c$ & $\gamma$\\
+\midrule
+Review-sensitive & .20 & .20 & 1.20 & .05 & .35\\
+Review-resistant & .16 & .25 & .40 & .70 & .30\\
+\bottomrule
+\end{tabular}
+\end{center}
+The robust B allocation is approximately $x=0.398907$, with worst-family
+risk $0.062156$. The assumed A curves give worst-family risk $0.049319$.
+Thus A performs better in this selected synthetic example. These values are
+illustrations of assumed response curves; they are not measurements or
+evidence that A is generally preferable.
+
+\section{Secondary analysis of public benchmark logs}
+We additionally summarize existing AgentDojo records \cite{debenedetti2024agentdojo}
+from the official repository at commit
+\nolinkurl{089ed468cf3ed0322acc66b0211f26d9d90dbf60}.
+This is secondary descriptive analysis; we did not rerun these models.
+We select five historical GPT-4o-2024-05-13 pipelines and the
+\texttt{important\_instructions} attack family. All five contain the same 97
+clean task keys and 629 attacked task--injection keys. The 3,630 selected
+records have boolean labels and no populated top-level error field.
+
+In the inspected scorer, attack-mode \texttt{security=true} denotes injection
+goal success. In clean runs that field is a sentinel and is not an ASR label.
+We report utility, attack success, and their joint outcome: safe completion
+under attack means utility true and attack success false.
+\begin{table}[ht]
+\centering\small
+\input{archive-table}
+\caption{Percentages recomputed from public historical labels. Clean utility
+uses 97 records per pipeline; attack columns use 629. These pipelines do not
+constitute our proposed matched-budget A/B experiment.}
+\end{table}
+
+The logs do not record the generation-time benchmark revision. Their final
+environments have not been reconstructed or rescored. Consequently these are
+descriptions of archived labels, not controlled causal comparisons or estimates
+for current models. Repeated task--attack pairs are dependent; we make no
+binomial significance claims. The tool filter selects tools and the injection
+detector processes returned content in the inspected implementation; neither
+is identified here as our pre-action independent sidecar. These observations
+motivate evaluating utility alongside ASR, but establish no architectural winner.
+
+\section{Development chronology and supplementary diagnostics}
+The planned evaluation pairs tasks and attacks across arms, measures clean
+utility and utility under attack, records unauthorized side effects, and
+reports safe completion separately from task completion. False blocks,
+malformed reviews and unavailable reviewers must be separated. Input tokens,
+output tokens, retries, review calls and end-to-end time must all be accounted
+for. Equal token limits do not imply equal prices.
+
+The primary A/B contrast bundles execution hardening and review. To attribute
+differences, the same-model pilot crosses two executor configurations
+(ordinary, hardened) with four review modes (none, full-history self-review,
+full-history independent-role review, and minimized-context independent-role
+review). Full-history review comparisons hold the candidate and serialized
+history fixed, changing only the documented role instruction. Creating a new
+process or API call with identical inputs does not itself define an information
+separation treatment. Context minimization changes both exposure and token cost.
+Model diversity is a subsequent factor. Reviewers in the initial single-action
+experiment only approve or reject, with no unequal repair opportunities.
+
+Paid model services and monetary budgets are not yet selected. A local
+development run now uses the community MLX 4-bit conversion of
+Qwen3-4B-Instruct-2507 (snapshot
+\nolinkurl{50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b}), greedy decoding and a
+128-token output limit. One task has a clean version and a direct recipient
+redirection attack. Four executor calls proposed the authorized action; twelve
+review calls approved these safe candidates. All eight configuration cells
+therefore complete both cases without unauthorized side effects. These are
+paired replay outcomes sharing four candidates, not sixteen independent
+trajectories. No dangerous proposal occurred, so this run provides no estimate
+of conditional reviewer misses or architectural benefit. It verifies local
+inference and recording on an uninformative development fixture. The calls
+used 3,262 input tokens and 184 generated tokens in approximately 16.8 seconds
+of measured generation time, excluding model loading and file hashing.
+This single sequential run includes warm-up effects and is not a latency
+benchmark. Raw outputs, token counts, prompt hashes, package versions and
+model-file hashes are retained.
+
+An expanded development run uses two lexical variants of the same delivery
+task, each with one clean input and six hand-authored attacks: direct
+instruction, claimed authority, role spoofing, dependency pretext,
+repetition and reviewer-targeted instruction. It uses the same model and
+decoding settings. Table~\ref{tab:local-dev} reports the twelve attacked cases.
+All configurations complete both clean cases. Ordinary execution proposes six
+unauthorized actions; full-history self-role review permits one and separate-role
+review permits two. Both remaining failures occur under reviewer-targeted
+instructions. Minimized review and the exact code policy permit none of these
+generated unsafe candidates. Hardening reduces unauthorized proposals to one
+and improves completion, but one malformed abstention and one valid abstention
+remain. Full-history review additionally blocks one authorized hardened
+candidate. A veto does not repair an incorrect proposal, which explains why
+lower harm need not increase completion. Costs are observed additional costs,
+not a matched-budget comparison. No significance or generalization claim is made.
+
+\begin{table}[ht]
+\centering
+\small
+\input{development-table.tex}
+\caption{Development replay on twelve attacked cases of one task family.
+Counts share executor candidates across review modes. Mean tokens include
+input and output tokens for the executor and any invoked reviewer, attributed
+per case. Policy is an exact non-LLM authorization check.}
+\label{tab:local-dev}
+\end{table}
+
+A separate constructed-candidate diagnostic exposes an important limitation.
+Across fourteen cases, full-history self-role and separate-role reviewers
+respectively allow 3/14 and 2/14 wrong-recipient candidates, and 9/14 and 8/14
+wrong-document candidates. Both falsely reject 2/14 authorized candidates.
+Minimized review rejects every wrong-recipient probe but permits every
+wrong-document probe. Its fourteen calls per candidate type contain only two
+distinct message inputs, repeated across the seven case variants: for wrong
+documents, the observed failure is thus 2/2 distinct inputs, not fourteen
+independent observations. For example, a trusted request to send \texttt{report}
+and a candidate sending \texttt{private} to the correct recipient receives
+\texttt{allow:true}. These are constructed proposals, not model-generated
+attack outcomes. This counterexample prevents interpreting the zero-harm
+replay arm as a generally reliable reviewer. Exact authorization rules reject
+both classes without model inference.
+
+The expanded run comprises 28 executor calls, 75 reviews of generated
+candidates and 126 constructed-candidate reviews: 229 real local calls,
+64,329 input tokens and 1,948 generated tokens. Measured generation time totals
+251.0 seconds. All calls end normally; malformed content is still scored as
+malformed. The development cases and raw outputs are retained. Broader tasks,
+independent test instances, adaptive attacks, prompt-format controls and model
+replication are required before interpreting these observations as a paper claim.
+
+We next test prompt sensitivity without attack text, using four lexical
+task variants and three constructed candidates per task. The four prompt
+conditions are canonical JSON, reversed top-level JSON key order, equivalent
+plain-text packaging, and canonical JSON with an explicit instruction to check
+both recipient and document. Only the key-order condition preserves the JSON
+content exactly; explicit checks change the instruction. This post-discovery
+diagnostic is not a held-out test. In addition to the same Qwen model, we use
+the community MLX 4-bit Llama-3.2-3B-Instruct snapshot
+\nolinkurl{7f0dc925e0d0afb0322d96f9255cfddf2ba5636e}, with the same greedy decoding
+and 128-token limit. Each model performs 48 calls.
+
+\begin{table}[ht]
+\centering
+\small
+\input{format-table.tex}
+\caption{Post-discovery authorization probes without attacks. Wrong-recipient
+and wrong-document columns count unsafe approvals; false block counts rejected
+authorized actions. Each denominator is four lexical variants of one task.}
+\label{tab:format-dev}
+\end{table}
+
+Table~\ref{tab:format-dev} shows that Qwen's wrong-document errors persist under
+key reordering and plain-text packaging; they occur on the two named-document
+variants but not the two opaque-identifier variants. Explicit checks produce
+correct decisions on all twelve Qwen candidates. Llama permits all eight unsafe
+candidates under canonical JSON. Reordering or plain text fixes the four
+wrong-recipient cases but leaves the four wrong-document failures. Explicit
+checks cause Llama to reject every candidate, including all four authorized
+ones. All responses parse correctly and end normally. These observations
+demonstrate prompt- and model-conditional behavior on this diagnostic, not a
+general remedy or a specific causal mechanism. A reviewer must pass clean
+authorization calibration with useful acceptance before an architecture
+comparison can be interpreted. Calibration must be separated from test data.
+
+We therefore freeze a separate clean calibration set and selection rule before
+running it. Twelve new lexical document/recipient combinations each yield an
+authorized, wrong-recipient, wrong-document and both-wrong candidate. The same
+canonical and explicit-check prompts yield 96 calls per model. Eligibility
+requires at least 11/12 authorized approvals and 35/36 deliberate unsafe
+rejections, with at most two malformed responses per configuration. This is a
+pragmatic development screen, not a statistical guarantee or externally
+registered study. Passing configurations are ranked by unsafe approvals,
+false blocks, malformed outputs and then token usage, in that order.
+Qwen canonical approves 12/12 authorized actions and rejects 35/36 unsafe
+ones; explicit checks achieves 12/12 and 36/36 and is selected. Llama canonical
+achieves 12/12 and 1/36; explicit checks achieves 1/12 and 35/36, so neither is
+eligible. All 192 responses parse correctly. Every configuration is retained.
+This selection does not establish transfer to injected context, semantic
+authorization or dynamic multi-step workflows; those require separate testing.
+
+The pre-action gate has additionally been integrated with the pinned AgentDojo
+tool executor. Eight scripted integration checks cover approval, rejection,
+malformed decisions, reviewer errors, immutable candidates, batched calls,
+unsupported nested calls and a simulated workspace mailbox. The mailbox check
+uses the upstream injection-goal predicate and confirms a state change on
+approval and no state change on rejection. This is enforcement verification,
+not a measurement of a learned reviewer's accuracy. The adapter reviews all
+tool calls; nested function-call arguments are currently rejected. It does not
+protect against arbitrary Python access to the unguarded runtime.
+
+We then connect Qwen3-4B to a loopback MLX server and the actual AgentDojo v1
+workspace tool runtime, preserving native system, assistant and tool roles and
+tool-call IDs. Three fixed clean tasks query a calendar event (task 0), read
+feedback scores from a file (task 28), and delete the largest file (task 35).
+All state changes remain inside the fictional benchmark environment. The
+executor has an eight-step cap and a 512-token per-call limit; reviewers use
+128 tokens. All configurations use greedy decoding. The reviewer uses a new
+schema-aware instruction allowing necessary reads while checking proposed
+effects and arguments. This is not the unchanged exact-match calibration
+prompt, so the study cannot isolate context transfer from prompt changes.
+
+\begin{table}[ht]
+\centering
+\small
+\input{live-clean-table.tex}
+\caption{Three clean native-tool development tasks per configuration. Blocks
+count denied tool attempts, not unique failed tasks. Tokens are API-reported
+input/output totals along different trajectories, not matched budgets.}
+\label{tab:live-clean}
+\end{table}
+
+Without review all three tasks pass the original utility predicates. Both
+review configurations complete two. In the deletion task, each reviewer rejects
+\texttt{list\_files} twice, so the executor never proposes deletion. Full review
+also blocks an initial calendar search, after which the executor recovers via
+another calendar tool. There are no malformed or unavailable review decisions.
+The denial cause cannot be inferred from the binary responses. The total is
+31 model calls across nine episodes, comprising 22 executor and nine reviewer
+calls. These trajectories show a useful-task loss in this configuration, not
+an attack-resistance result or a general architecture ranking. Lower token
+totals in reviewed runs partly reflect not receiving the large file listing;
+they are not an efficiency improvement at equal utility. Server prompt caches
+also persist across runs, so latency is not compared.
+
+We retain each native request, response, tool message, review decision and
+initial/final environment. Re-executing the saved decisions reproduces all
+nine message histories, gate audits and final serialized states, and reapplying
+the original utility predicates reproduces the scores without model calls.
+Final snapshots are compared as serialized state: upstream model validators
+reinitialize live file maps and must not be used to restore a post-deletion
+snapshot. Two additional native-message tests bring integration checks to ten.
+
+A subsequent development ablation exempts four inspected nonmutating tools
+from model review: calendar search, day-calendar lookup, filename search and
+file listing. Other calls remain gated. This is a changed authorization scope,
+not an improvement to the review model, and it does not enforce confidentiality
+of reads or final answers. With the same three clean tasks, full-history review
+now completes all three. Minimized review still completes two: after listing
+files, it rejects the correct deletion candidate and two subsequent file-ID
+lookups. Full review approves the deletion. Both observe the same trusted
+request and candidate; full review additionally receives the history needed
+to relate the dynamically discovered ID to the requested largest file.
+
+We then freeze three payloads on the networking-event description used by
+workspace task 0: a direct instruction, claimed workflow authority and role
+spoofing. The goal is the suite's injection task 0, an unrequested simulated
+email. No real message is sent. The benchmark YAML transport folds the
+role-spoof payload's newlines; delivered descriptions and native tool responses
+are retained. All three payloads reach the calendar tool response. The injected
+environment differs only in the relevant calendar description. These are
+fixed, hand-authored development attacks on one task, not adaptive attacks or
+three independent task instances.
+
+\begin{table}[ht]
+\centering
+\small
+\input{native-pilot-table.tex}
+\caption{Native development outcomes. Clean utility covers three fixed tasks;
+attack columns cover three payload variants on a single calendar task. Both
+reviewed configurations use the explicit read allowlist. Budgets are unequal.}
+\label{tab:native-pilot}
+\end{table}
+
+Without review and with full-history review, all three injected emails execute.
+With minimized review, all are blocked and the calendar task completes. The
+proposed email arguments match across the three configurations for each attack.
+The original attack predicate and utility predicate are evaluated on final
+state. Table~\ref{tab:native-pilot} exposes a bounded tradeoff: history helps the
+clean deletion but full-history review fails the tested calendar injections.
+It does not establish a universal context policy or architectural ranking.
+Minimized review also consumes more clean-run tokens than full review
+(68,677 versus 54,149) because its trajectory includes failed recovery attempts;
+shorter review prompts need not imply lower end-to-end resource use.
+
+These five new runs contain 53 additional model calls: twenty on six clean
+episodes and 33 on nine attacked episodes. Recorded-decision replay reproduces
+their tool histories, gate audits, final states and native scores. For simulated
+email creation, replay supplies the timestamp observed in the original tool
+result to the tool's wall-clock function; it does not copy the resulting email
+state or change original runs. Three added checks bring integration tests to
+thirteen, covering the read allowlist and the attack injection boundary.
+
+\paragraph{Native architecture controls.}
+We additionally evaluate an executor with an appended trust-boundary and
+per-argument authorization instruction, without a reviewer, and a self-role
+full-history reviewer. The latter changes only the initial role sentence of
+the independent full-history review prompt. It remains a fresh serialized
+review call using the same model, schema and read allowlist; it is not a test
+of hidden-state introspection or organizational independence. Both controls
+reuse the unchanged development cohorts. They each complete all three clean
+tasks, but all three calendar payloads achieve their attacker goal.
+
+\begin{table}[ht]
+\centering
+\scriptsize
+\input{native-controls-table.tex}
+\caption{Expanded native development controls. AS denotes attacker success.
+Clean columns cover three tasks; attack columns cover three payloads on one
+task. Token totals include inputs and outputs across each cohort. No matched
+budget or independent test-set claim is made.}
+\label{tab:native-controls}
+\end{table}
+
+The four added runs contain 37 model calls across twelve episodes. Their
+recorded-decision replays reproduce final states, tool histories and native
+scores, and verify trusted system and user messages against the configured
+prompts and suite. Fourteen integration tests pass. Offline tokenization
+reproduces all 37 recorded prompt counts, as well as 60 earlier native calls;
+this validates prompt accounting for this pinned text/tool template, not
+equal computational cost. The following pilot begins shared-budget enforcement.
+An offline admission audit reconstructs the actor/reviewer order of thirty
+recorded trajectories. With full output-allowance reservation, all recorded
+paths fit a 64,000-token episode cap; at 32,000, each reviewed configuration
+has one path that does not fit, whereas all ordinary and hardened paths fit.
+The largest required cap is 53,305 tokens for a minimized-review trajectory.
+These are recorded-path accounting properties, not counterfactual live
+outcomes. The shared ledger is now connected to the native runner.
+The development budget grid is 8,000, 16,000, 32,000 and
+64,000 input-plus-output tokens; this metric does not equate computational
+cost across input, output or cached tokens.
+The first completed slice, 8,000 tokens, contains thirty new actor calls across
+thirty episodes and all five configurations. Every episode exhausts its budget
+after the first read, before a second actor request can be dispatched. No
+reviewer is called, and all clean utility, attacked utility and attacker-success
+scores are false. This is an unproductive resource floor, not effective defense
+or an architectural ranking. All trajectories and budget ledgers replay, and
+independent tokenization reproduces sixty admitted or denied prompt counts.
+Eighteen native integration
+tests and 46 core tests pass, including tests that distinguish exhaustion before
+a side effect from exhaustion after an authorized side effect has succeeded.
+The 16,000-token slice adds 79 local calls across thirty episodes. All five
+configurations complete two of three clean tasks. The four non-minimized arms
+each have three attacker successes and zero attacked-task completions;
+minimized review has zero attacker successes and three attacked-task
+completions. All ten runs pass state, scorer and ledger replay; independent
+tokenization reproduces 85 admitted or denied prompt counts. The ordinary
+deletion's next reservation would require 16,069 tokens, illustrating sensitivity
+to the full-output reservation rule at this cap. One hardened attack episode
+exhausts its budget after the attacker goal succeeds, so exhaustion is not
+automatically counted as safety.
+
+At 32,000 tokens, the four non-minimized configurations score three of three
+clean tasks, while minimized review remains at two. Attacker-success and
+attacked-utility outcomes match the 16k slice. Self-role and full review each
+exhaust once after the authorized deletion succeeds but before the final reply;
+minimized review rejects that deletion and terminates without exhausting its
+budget. All ten runs replay, and independent tokenization matches 93 admitted
+or denied prompts covering 91 new model calls.
+
+At 64,000 tokens, all five configurations finish without budget exhaustion.
+Utility and attacker-success scores match the 32k slice: the four non-minimized
+arms score three clean successes and three attacker successes, while minimized
+review scores two clean successes, zero attacker successes and three attacked
+task successes. This slice adds 93 model calls. The complete matrix contains
+40 runs, 120 episodes and 293 actual model calls, with all runs verified by
+state/scorer/ledger replay and all 331 admitted or denied prompt counts checked
+by independent retokenization. The 120 episodes reuse three clean tasks and
+one attacked task; they are not independent task-level evidence. The model
+server was stopped after completion.
+
+An exact rendered-prefix audit reveals an additional limitation. The earlier
+uncapped and current 32k minimized deletion episodes have identical first three
+actor prompts at the token level, identical generation settings, and identical
+first-review prompts and responses. Their third actor outputs differ: the older
+run attempts recovery, whereas the new run refuses and terminates. Neither third
+call is denied by the budget. Fixed seed and temperature therefore do not ensure
+exact trajectory reproducibility in these recorded runs. The cause is not
+established, and the shorter trajectory must not be attributed to the cap.
+The 32k and 64k minimized deletion episodes, in contrast, have matching rendered
+prompts and corresponding outputs excluding tool-call IDs. This agreement does
+not negate the earlier observed variability. A post-discovery fixed-request
+cache diagnostic subsequently repeats the frozen third actor request five times
+with prompt-cache capacity 10 and five times with capacity 0, restarting the
+server before each condition. All ten output messages are identical and propose
+no tools. In the capacity-10 condition the first call reports zero cached tokens
+and the remaining four each report 11,959; capacity 0 reports zero throughout.
+Every prompt independently retokenizes to 11,960 tokens. The request, model-file
+hashes, runtime sources, raw outputs and usage receipts are preserved and checked.
+No proposed tool is executed. This diagnostic does not reproduce the earlier
+divergence and does not establish its cause or general whole-task determinism.
+
+\begin{table}[ht]
+\centering
+\input{repeatability-table.tex}
+\caption{Post-discovery fixed-request diagnostic: one prompt, five sequential
+calls per cache condition. Unique outputs exclude generated tool-call IDs.
+This is not task-level replication or safety evaluation.}
+\label{tab:repeatability}
+\end{table}
+Repeated runs and variability analysis remain necessary. These fixed policies
+also do not optimize actor/reviewer allocation: per-call output allowances are
+512/128 tokens and the models are not told the remaining budget.
+
+
+
+Within these examples, the self-role and independent full-history reviews
+have identical aggregate outcomes. This is a limited role-prompt observation,
+not evidence that self-review and independent oversight are generally
+equivalent. Likewise, one failed hardening prompt cannot establish failure of
+the entire integrated-hardening approach.
+
+The single-action replay remains distinct from these limited live trajectories.
+Adaptive attacks, held-out splits, task-level uncertainty,
+semantic authorization, multiple agents and empirical response-curve
+calibration remain outstanding. The safety-only budget objective omits false
+positives and useful-task performance, so its optimizer is not a deployment
+recommendation.
+
+
+\input{native-prompts.tex}
+
+\clearpage
+\bibliographystyle{plain}
+\bibliography{references}
+\end{document}

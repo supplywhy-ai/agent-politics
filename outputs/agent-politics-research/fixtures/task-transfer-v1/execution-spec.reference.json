@@ -1,0 +1,30 @@
+{
+  "plan_sha256": "a786b56d44601e3760b63f3b252fcefc38401ca794ab8faaf2ffd2d81c7a5a5c",
+  "sources_sha256": {
+    "agentdojo_local_live.py": "f3e17189ada81ef919248f5816d2febee84335a46d122bc69afd5bcfad798f17",
+    "agentdojo_gate.py": "7a8848d34c71f02f97729b8acf70ca5a4c82c8886f0fd9ebbf2741bf53677bc5",
+    "read_policy.py": "e22c51ce009d34d798d54322dfb2963aa2cb350651176b3ea2ccc12d421419aa",
+    "native_budget.py": "1e74ed37ce7e3ad4a3c6f59c52a6ca70d30e5bde1788459fab51f28f27c3659c",
+    "token_budget.py": "a47673b5d940618206be49652bc7fde0a2646ad44fadf2387cb7def99a9b0d58",
+    "count_native_tokens.py": "e5f02a2f05c9d1ce7620a9681861b5071e768a72327e47aa5d65616078d5da69",
+    "run_transfer_batch.py": "2c5fad44a6f3201584f66e59118378d3bd2801c3ac4c00f11680e628af0b3d4a"
+  },
+  "model_id": "mlx-community/Qwen3-4B-Instruct-2507-4bit@50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b",
+  "model_files_sha256": {
+    "README.md": "7b17ce562d7ea121c86d2ffdf660eed3726ac5b52cacfa9f1de11a65969f5657",
+    "added_tokens.json": "c0284b582e14987fbd3d5a2cb2bd139084371ed9acbae488829a1c900833c680",
+    "chat_template.jinja": "40c21f34cf67d8c760ef72f8ad3ae5afad514299d4b06e91dd9a8d705af7b541",
+    "config.json": "574349e5a343236546fda55e4744a76e181f534182d7dc60ff1bad7e7a502849",
+    "generation_config.json": "835fffe355c9438e7a25be099b3fccaa98350b83451f9fd2d99512e74f1ade48",
+    "merges.txt": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+    "model.safetensors": "2a73c6c248601ab904e035548abd8e6abb65ea27dcb5f342fb0a8910eb44173f",
+    "model.safetensors.index.json": "388d811b8b7c2608dd04cce1bcb04a8bf715d19b42790894e6d3427ff429a777",
+    "special_tokens_map.json": "76862e765266b85aa9459767e33cbaf13970f327a0e88d1c65846c2ddd3a1ecd",
+    "tokenizer.json": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+    "tokenizer_config.json": "4397cc477eb6d79715ccd2000accd6b3531928f30029665832fa1b255f24d2b9",
+    "vocab.json": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+  },
+  "python_hash_seed": "20261025",
+  "server_prompt_cache_size": 10,
+  "scope": "Frozen execution specification for transfer study. Verify with matching PYTHONHASHSEED."
+}

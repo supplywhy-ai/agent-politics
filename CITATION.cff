@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "Please cite the accompanying paper when using this software."
+title: "Agent Politics: Context, Authorization and the Cost of Independent Oversight"
+authors:
+  - family-names: Huang
+    given-names: Shan
+    affiliation: Supplywhy.ai Inc
+type: software
+version: 0.1.0
+repository-code: https://github.com/supplywhy-ai/agent-politics
+license: MIT

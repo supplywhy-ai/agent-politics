@@ -1,0 +1,8 @@
+{
+  "scope": "Code, fixtures, derived tables and manuscript. Full model request/response and environment archives are retained locally and are not included in this release.",
+  "path_rebasing": "Fixture paths are relative to repository root; execution-spec.reference.json is historical reference only. A new run writes its own execution-spec.json.",
+  "selected_transfer_episodes": 480,
+  "underlying_transfer_tasks": 10,
+  "development_episodes": 120,
+  "data_source": "Verified saved evaluation outputs; repeats are not independent tasks."
+}

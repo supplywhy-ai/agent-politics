@@ -1,0 +1,10 @@
+work/
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+.env
+.env.*
+outputs/agent-politics-research/results/agentdojo-*/
+outputs/agent-politics-research/results/calibration-qwen-v1/
+outputs/agent-politics-research/fixtures/task-transfer-v1/execution-spec.json

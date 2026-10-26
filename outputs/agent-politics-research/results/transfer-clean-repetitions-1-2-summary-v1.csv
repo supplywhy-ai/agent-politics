@@ -1,0 +1,9 @@
+repetition,arm,tasks,native_utility,actual_tokens
+1,ordinary,10,4,169885
+1,hardened,10,4,167419
+1,full,10,5,196223
+1,minimized,10,6,207880
+2,ordinary,10,5,176164
+2,hardened,10,4,155871
+2,full,10,5,216097
+2,minimized,10,6,207266

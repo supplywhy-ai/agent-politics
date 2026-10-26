@@ -1,0 +1,13 @@
+repetition,arm,tasks,native_utility,actual_tokens,actual_tokens_complete,infrastructure_errors,uncertain_reserved_tokens
+1,ordinary,10,4,169885,1,0,0
+1,hardened,10,4,167419,1,0,0
+1,full,10,5,196223,1,0,0
+1,minimized,10,6,207880,1,0,0
+2,ordinary,10,5,176164,1,0,0
+2,hardened,10,4,155871,1,0,0
+2,full,10,5,216097,1,0,0
+2,minimized,10,6,207266,1,0,0
+3,ordinary,10,5,182059,1,0,0
+3,hardened,10,4,160050,1,0,0
+3,full,10,5,216172,1,0,0
+3,minimized,10,6,207377,1,0,0
